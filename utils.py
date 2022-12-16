@@ -86,37 +86,58 @@ def h_step_forecast(num_kernels,num_lags,y,train_size,h):
     
     return X_test_h_step_pred
 
+# Function to forecast with XGBoost with lags
+def prediction(df, pred, test_n, model):
+    columns = len(df.columns)
+    pred = pred.to_numpy()
+    pred = pred[:test_n]
+    df[df.index>test_n] = 0
+    for i in range(test_n-1, len(df)):
+        pred = np.append(pred, model.predict(df[df.index==i]))
+        if i < len(df):
+            df[df.index==i+1] = pred[-columns-1:-1][::-1]
+    return df, pred
 
+#Function to fit XGBoost on train data and visualize the results on test data
 def fit_predict(df_train, df_test, num_lags=2, time=True, lag=True, name='Something'):
+    df_full = pd.concat((df_train, df_test))
+    x_full, y_full = change_df(df_full, num_lags, time, lag)
+    x_test, y_test = x_full[x_full.index >= len(df_train)], y_full[y_full.index >= len(df_train)]
     # Extraction of date variables for train set
     X, Y = change_df(y, num_lags, time, lag)
     # Creation of grid to find the best params
-    grid = {'n_estimators':[100,500,1000,2000], 'max_depth':[1,2,3,5], 
-            'max_leaves':[1,2,5,10], 'n_jobs':[-1]}
-    #grid={'max_depth':[1,2,3,5]}
+    #grid = {'n_estimators':[100,500,1000,2000], 'max_depth':[1,2,3,5], 
+    #        'max_leaves':[1,2,5,10], 'n_jobs':[-1]}
+    grid={'max_depth':[1,2,3,5]}
     
     # Creation of GridSearchCV with custom cross validation folders
     # Folders were visualized earlier
-    model = GridSearchCV(XGBRegressor(), param_grid=grid, cv=cv, verbose=1)
+    model = GridSearchCV(XGBRegressor(), param_grid=grid, cv=cv, verbose=1, scoring='r2')
     
     # Train of the model on train dataset
     model.fit(X, Y)
     
     # Predicting new values step by step:
-    x_test, y_test = change_df(y_validate, num_lags, time, lag)
-    pred = model.predict(x_test)
+    #x_test, y_test = change_df(y_validate, num_lags, time, lag)
+    if lag: 
+        temp, pred = prediction(x_full, y_full, 90, model)
+        pred = pred[91:]
+    else:
+        pred = model.predict(x_test)
     
-    fig,ax = plt.subplots(2,1,figsize=(12,8))
+    fig,ax = plt.subplots(2,1,figsize=(8,6))
     ax[0].plot(range(len(pred)), pred, c='r', label='Predicted data')
     ax[0].plot(range(len(pred)), y_test, c='b', label='Real data')
     ax[0].set_xlabel('Time')
     ax[0].set_ylabel('Number of passengers')
     ax[0].set_title(name)
+    ax[0].legend()
     
     r2_scores = [r2_score(pred[:i], y_test[:i]) for i in range(3, 25)]
     ax[1].plot(range(3,25), r2_scores)
     ax[1].set_xlabel('Month of forecasting')
     ax[1].set_ylabel('$R^2$ score')
+    return model, pred
 
 # Function that extracts data variables such as month and year from the date
 def change_df(df, num_lag=12, time=True, lag=True):
